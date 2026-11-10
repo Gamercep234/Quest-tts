@@ -1,0 +1,1054 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+          cache-disabled: true
+
+      - name: Crear el proyecto
+        run: |
+          set -e
+          mkdir -p quest_tts
+          cd quest_tts
+          mkdir -p .
+          cat > settings.gradle.kts <<'QTTS_EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "QuestTTS"
+          include(":app")
+          QTTS_EOF
+          mkdir -p .
+          cat > build.gradle.kts <<'QTTS_EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          QTTS_EOF
+          mkdir -p .
+          cat > gradle.properties <<'QTTS_EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.nonTransitiveRClass=true
+          kotlin.code.style=official
+          QTTS_EOF
+          mkdir -p app
+          cat > app/build.gradle.kts <<'QTTS_EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.example.questtts"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.example.questtts"
+                  minSdk = 29
+                  targetSdk = 32
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          QTTS_EOF
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'QTTS_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.TTS_SERVICE" />
+                  </intent>
+              </queries>
+
+              <application
+                  android:allowBackup="true"
+                  android:label="TTS Twitch"
+                  android:theme="@android:style/Theme.Material.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".KeepAliveService"
+                      android:exported="false" />
+              </application>
+          </manifest>
+          QTTS_EOF
+          mkdir -p app/src/main/res/layout
+          cat > app/src/main/res/layout/activity_main.xml <<'QTTS_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:fillViewport="true">
+
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:orientation="vertical"
+                  android:padding="24dp">
+
+                  <!-- Canal -->
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="Canal de Twitch"
+                      android:textSize="20sp"
+                      android:textStyle="bold" />
+
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:gravity="center_vertical"
+                      android:orientation="horizontal">
+
+                      <EditText
+                          android:id="@+id/etChannel"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:hint="nombre del canal"
+                          android:imeOptions="actionDone"
+                          android:inputType="text"
+                          android:singleLine="true" />
+
+                      <Button
+                          android:id="@+id/btnConnect"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="Conectar" />
+                  </LinearLayout>
+
+                  <!-- Controles -->
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="20dp"
+                      android:text="Controles"
+                      android:textSize="20sp"
+                      android:textStyle="bold" />
+
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:orientation="horizontal">
+
+                      <Button
+                          android:id="@+id/btnPause"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:text="⏸ Pausar" />
+
+                      <Button
+                          android:id="@+id/btnSkip"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:text="⏭ Saltar mensaje" />
+                  </LinearLayout>
+
+                  <!-- Opciones -->
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="20dp"
+                      android:text="Opciones"
+                      android:textSize="20sp"
+                      android:textStyle="bold" />
+
+                  <CheckBox
+                      android:id="@+id/cbName"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="Leer el nombre del usuario" />
+
+                  <CheckBox
+                      android:id="@+id/cbCmd"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="Ignorar comandos (mensajes que empiezan con !)" />
+
+                  <CheckBox
+                      android:id="@+id/cbLinks"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="Ignorar mensajes con links" />
+
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:gravity="center_vertical"
+                      android:orientation="horizontal">
+
+                      <TextView
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="Máx. caracteres:" />
+
+                      <EditText
+                          android:id="@+id/etMax"
+                          android:layout_width="100dp"
+                          android:layout_height="wrap_content"
+                          android:inputType="number"
+                          android:maxLength="3" />
+                  </LinearLayout>
+
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:gravity="center_vertical"
+                      android:orientation="horizontal">
+
+                      <TextView
+                          android:layout_width="90dp"
+                          android:layout_height="wrap_content"
+                          android:text="Velocidad:" />
+
+                      <SeekBar
+                          android:id="@+id/sbRate"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:max="150" />
+                  </LinearLayout>
+
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:gravity="center_vertical"
+                      android:orientation="horizontal">
+
+                      <TextView
+                          android:layout_width="90dp"
+                          android:layout_height="wrap_content"
+                          android:text="Volumen:" />
+
+                      <SeekBar
+                          android:id="@+id/sbVol"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:max="100" />
+                  </LinearLayout>
+
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:gravity="center_vertical"
+                      android:orientation="horizontal">
+
+                      <TextView
+                          android:layout_width="90dp"
+                          android:layout_height="wrap_content"
+                          android:text="Voz:" />
+
+                      <Spinner
+                          android:id="@+id/spVoice"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1" />
+
+                      <Button
+                          android:id="@+id/btnTest"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="Probar" />
+                  </LinearLayout>
+
+                  <!-- Lista negra -->
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="20dp"
+                      android:text="Lista negra (usuarios que NO se leen)"
+                      android:textSize="20sp"
+                      android:textStyle="bold" />
+
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:gravity="center_vertical"
+                      android:orientation="horizontal">
+
+                      <EditText
+                          android:id="@+id/etNewUser"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:hint="usuario"
+                          android:imeOptions="actionDone"
+                          android:inputType="text"
+                          android:singleLine="true" />
+
+                      <Button
+                          android:id="@+id/btnAdd"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="Añadir" />
+                  </LinearLayout>
+
+                  <LinearLayout
+                      android:id="@+id/llBlacklist"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:orientation="vertical" />
+
+                  <!-- Registro -->
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="20dp"
+                      android:text="Registro"
+                      android:textSize="20sp"
+                      android:textStyle="bold" />
+
+                  <TextView
+                      android:id="@+id/tvLog"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:minHeight="120dp"
+                      android:textSize="15sp" />
+
+                  <TextView
+                      android:id="@+id/tvStatus"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="12dp"
+                      android:text="Desconectado"
+                      android:textStyle="italic" />
+              </LinearLayout>
+          </ScrollView>
+          QTTS_EOF
+          mkdir -p app/src/main/java/com/example/questtts
+          cat > app/src/main/java/com/example/questtts/Core.kt <<'QTTS_EOF'
+          package com.example.questtts
+
+          import android.content.Context
+          import android.content.SharedPreferences
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.speech.tts.TextToSpeech
+          import android.speech.tts.UtteranceProgressListener
+          import android.speech.tts.Voice
+          import java.util.LinkedList
+          import java.util.Locale
+          import java.util.concurrent.LinkedBlockingQueue
+
+          /**
+           * Lógica del TTS: configuración, motor de voz, cola de mensajes y conexión al chat.
+           * Vive a nivel de proceso para que siga funcionando aunque se cierre la ventana.
+           */
+          object Core {
+              private lateinit var appContext: Context
+              private lateinit var prefs: SharedPreferences
+
+              private var tts: TextToSpeech? = null
+
+              @Volatile
+              var ttsReady = false
+                  private set
+
+              @Volatile
+              var paused = false
+                  private set
+
+              @Volatile
+              var status = "Desconectado"
+                  private set
+
+              var voices: List<Voice> = emptyList()
+                  private set
+
+              /** La interfaz se registra aquí para refrescarse. Siempre se llama en el hilo principal. */
+              var uiListener: (() -> Unit)? = null
+
+              private var chat: TwitchChat? = null
+              private val queue = LinkedBlockingQueue<String>()
+              private val lock = Any()
+              private var speaking = false
+              private val main = Handler(Looper.getMainLooper())
+              private val logLines = LinkedList<String>()
+              private val urlRegex = Regex("https?://\\S+|www\\.\\S+", RegexOption.IGNORE_CASE)
+
+              private val defaultBlacklist = setOf("nightbot", "streamelements", "streamlabs", "moobot")
+
+              val connected: Boolean get() = chat != null
+
+              // ---------- Configuración ----------
+              var channel: String
+                  get() = prefs.getString("channel", "") ?: ""
+                  set(v) = prefs.edit().putString("channel", v).apply()
+
+              var readName: Boolean
+                  get() = prefs.getBoolean("readName", true)
+                  set(v) = prefs.edit().putBoolean("readName", v).apply()
+
+              var ignoreCommands: Boolean
+                  get() = prefs.getBoolean("ignoreCommands", true)
+                  set(v) = prefs.edit().putBoolean("ignoreCommands", v).apply()
+
+              var ignoreLinks: Boolean
+                  get() = prefs.getBoolean("ignoreLinks", true)
+                  set(v) = prefs.edit().putBoolean("ignoreLinks", v).apply()
+
+              var maxLength: Int
+                  get() = prefs.getInt("maxLength", 200)
+                  set(v) = prefs.edit().putInt("maxLength", v).apply()
+
+              /** Velocidad de voz: 0.5 a 2.0 (1.0 = normal). */
+              var rate: Float
+                  get() = prefs.getFloat("rate", 1.0f)
+                  set(v) = prefs.edit().putFloat("rate", v).apply()
+
+              /** Volumen: 0.0 a 1.0. */
+              var volume: Float
+                  get() = prefs.getFloat("volume", 1.0f)
+                  set(v) = prefs.edit().putFloat("volume", v).apply()
+
+              var voiceName: String
+                  get() = prefs.getString("voiceName", "") ?: ""
+                  set(v) = prefs.edit().putString("voiceName", v).apply()
+
+              // ---------- Lista negra ----------
+              fun blacklist(): List<String> =
+                  (prefs.getStringSet("blacklist", defaultBlacklist) ?: defaultBlacklist).toList().sorted()
+
+              fun addBlacklist(user: String) {
+                  val u = user.trim().lowercase().removePrefix("@")
+                  if (u.isEmpty()) return
+                  val set = blacklist().toMutableSet()
+                  set.add(u)
+                  prefs.edit().putStringSet("blacklist", set).apply()
+                  notifyUi()
+              }
+
+              fun removeBlacklist(user: String) {
+                  val set = blacklist().toMutableSet()
+                  set.remove(user)
+                  prefs.edit().putStringSet("blacklist", set).apply()
+                  notifyUi()
+              }
+
+              // ---------- Inicio ----------
+              fun init(ctx: Context) {
+                  if (this::appContext.isInitialized) return
+                  appContext = ctx.applicationContext
+                  prefs = appContext.getSharedPreferences("config", Context.MODE_PRIVATE)
+                  initTts()
+              }
+
+              private fun initTts() {
+                  tts = TextToSpeech(appContext) { result ->
+                      val t = tts
+                      if (result != TextToSpeech.SUCCESS || t == null) {
+                          log("Error: no hay motor de voz (TTS) instalado o no se pudo iniciar.")
+                          return@TextToSpeech
+                      }
+                      var lang = t.setLanguage(Locale("es", "ES"))
+                      if (lang < 0) lang = t.setLanguage(Locale("es"))
+                      if (lang < 0) {
+                          log("El motor de voz no tiene español instalado. Instala el idioma en los ajustes del motor TTS.")
+                      }
+                      voices = try {
+                          t.voices?.filter { it.locale.language == "es" }?.sortedBy { it.name } ?: emptyList()
+                      } catch (_: Exception) {
+                          emptyList()
+                      }
+                      applyVoice()
+                      t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                          override fun onStart(utteranceId: String?) {}
+
+                          override fun onDone(utteranceId: String?) {
+                              speechEnded()
+                          }
+
+                          @Deprecated("Deprecated in Java")
+                          override fun onError(utteranceId: String?) {
+                              speechEnded()
+                          }
+
+                          override fun onError(utteranceId: String?, errorCode: Int) {
+                              log("Error de voz (código $errorCode)")
+                              speechEnded()
+                          }
+
+                          override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                              speechEnded()
+                          }
+                      })
+                      ttsReady = true
+                      log("Motor de voz listo (${t.defaultEngine}), ${voices.size} voces en español")
+                      notifyUi()
+                  }
+              }
+
+              fun applyVoice() {
+                  val name = voiceName
+                  if (name.isEmpty()) return
+                  voices.firstOrNull { it.name == name }?.let { tts?.setVoice(it) }
+              }
+
+              // ---------- Cola de voz ----------
+              private fun enqueue(text: String) {
+                  synchronized(lock) {
+                      queue.add(text)
+                      if (!speaking) speakNext()
+                  }
+              }
+
+              // Llamar con el lock tomado
+              private fun speakNext() {
+                  if (paused || !ttsReady) {
+                      speaking = false
+                      return
+                  }
+                  val text = queue.poll()
+                  val t = tts
+                  if (text == null || t == null) {
+                      speaking = false
+                      return
+                  }
+                  speaking = true
+                  t.setSpeechRate(rate)
+                  val params = Bundle().apply {
+                      putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume)
+                  }
+                  val res = t.speak(text, TextToSpeech.QUEUE_FLUSH, params, "u${System.nanoTime()}")
+                  if (res != TextToSpeech.SUCCESS) {
+                      speaking = false
+                      log("No se pudo reproducir el mensaje")
+                  }
+              }
+
+              private fun speechEnded() {
+                  synchronized(lock) {
+                      speaking = false
+                      speakNext()
+                  }
+              }
+
+              fun speakTest() {
+                  enqueue("Hola, así suena mi voz")
+              }
+
+              /** Corta el mensaje actual y pasa al siguiente de la cola. */
+              fun skip() {
+                  tts?.stop()
+              }
+
+              fun togglePause() {
+                  paused = !paused
+                  if (paused) {
+                      synchronized(lock) { queue.clear() }
+                      tts?.stop()
+                      log("— PAUSADO (los mensajes nuevos no se leen) —")
+                  } else {
+                      log("— REANUDADO —")
+                  }
+                  notifyUi()
+              }
+
+              // ---------- Mensajes ----------
+              private fun handleMessage(login: String, name: String, raw: String) {
+                  if (paused) return
+                  if (login in blacklist()) return
+                  var text = raw.trim()
+                  if (text.isEmpty()) return
+                  if (ignoreCommands && text.startsWith("!")) return
+                  if (ignoreLinks && urlRegex.containsMatchIn(text)) return
+                  text = urlRegex.replace(text, "").trim()
+                  if (text.isEmpty()) return
+                  if (text.length > maxLength) text = text.substring(0, maxLength)
+
+                  log("$name: $text")
+                  enqueue(if (readName) "$name dice: $text" else text)
+              }
+
+              // ---------- Conexión ----------
+              fun connect(channelName: String) {
+                  disconnect()
+                  val c = channelName.trim()
+                  if (c.isEmpty()) return
+                  channel = c
+                  chat = TwitchChat(c, { l, n, t -> handleMessage(l, n, t) }, { setStatus(it) }).also { it.start() }
+                  KeepAliveService.start(appContext)
+                  notifyUi()
+              }
+
+              fun disconnect() {
+                  chat?.stopChat()
+                  chat = null
+                  KeepAliveService.stop(appContext)
+                  setStatus("Desconectado")
+              }
+
+              // ---------- Estado e interfaz ----------
+              private fun setStatus(s: String) {
+                  main.post {
+                      status = s
+                      uiListener?.invoke()
+                  }
+              }
+
+              fun log(line: String) {
+                  main.post {
+                      synchronized(logLines) {
+                          logLines.add(line)
+                          while (logLines.size > 100) logLines.removeFirst()
+                      }
+                      uiListener?.invoke()
+                  }
+              }
+
+              fun logText(): String = synchronized(logLines) { logLines.takeLast(15).joinToString("\n") }
+
+              private fun notifyUi() {
+                  main.post { uiListener?.invoke() }
+              }
+          }
+          QTTS_EOF
+          mkdir -p app/src/main/java/com/example/questtts
+          cat > app/src/main/java/com/example/questtts/TwitchChat.kt <<'QTTS_EOF'
+          package com.example.questtts
+
+          import java.io.BufferedReader
+          import java.io.IOException
+          import java.io.InputStreamReader
+          import java.net.Socket
+          import javax.net.ssl.SSLSocketFactory
+
+          /**
+           * Cliente del chat de Twitch (IRC anónimo, solo lectura, por TLS).
+           * No necesita token ni login.
+           */
+          class TwitchChat(
+              channel: String,
+              private val onMessage: (login: String, name: String, text: String) -> Unit,
+              private val onStatus: (String) -> Unit,
+          ) : Thread() {
+
+              private val channel = channel.trim().lowercase().removePrefix("#")
+
+              @Volatile
+              private var stopped = false
+
+              @Volatile
+              private var socket: Socket? = null
+
+              init {
+                  isDaemon = true
+              }
+
+              fun stopChat() {
+                  stopped = true
+                  try {
+                      socket?.close()
+                  } catch (_: Exception) {
+                  }
+                  interrupt()
+              }
+
+              override fun run() {
+                  while (!stopped) {
+                      try {
+                          onStatus("Conectando a #$channel...")
+                          val s = SSLSocketFactory.getDefault().createSocket("irc.chat.twitch.tv", 6697)
+                          socket = s
+                          // Twitch manda PING cada ~5 min; si pasan 6 sin nada, reconectamos.
+                          s.soTimeout = 6 * 60 * 1000
+                          val reader = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.UTF_8))
+                          val out = s.getOutputStream()
+
+                          fun send(line: String) {
+                              out.write((line + "\r\n").toByteArray(Charsets.UTF_8))
+                              out.flush()
+                          }
+
+                          send("CAP REQ :twitch.tv/tags")
+                          send("PASS SCHMOOPIIE")
+                          send("NICK justinfan${(10000..99999).random()}")
+                          send("JOIN #$channel")
+                          onStatus("Conectado a #$channel")
+
+                          while (!stopped) {
+                              val line = reader.readLine() ?: throw IOException("Conexión cerrada")
+                              if (line.startsWith("PING")) {
+                                  send("PONG :tmi.twitch.tv")
+                                  continue
+                              }
+                              val msg = parse(line) ?: continue
+                              if (!stopped) onMessage(msg.first, msg.second, msg.third)
+                          }
+                      } catch (e: Exception) {
+                          if (!stopped) {
+                              onStatus("Error: ${e.message}. Reintentando en 5s...")
+                              try {
+                                  sleep(5000)
+                              } catch (_: InterruptedException) {
+                              }
+                          }
+                      } finally {
+                          try {
+                              socket?.close()
+                          } catch (_: Exception) {
+                          }
+                      }
+                  }
+              }
+
+              private fun parse(raw: String): Triple<String, String, String>? {
+                  var line = raw
+                  val tags = HashMap<String, String>()
+                  if (line.startsWith("@")) {
+                      val idx = line.indexOf(' ')
+                      if (idx < 0) return null
+                      for (t in line.substring(1, idx).split(";")) {
+                          val eq = t.indexOf('=')
+                          if (eq > 0) tags[t.substring(0, eq)] = t.substring(eq + 1)
+                      }
+                      line = line.substring(idx + 1)
+                  }
+                  val marker = " PRIVMSG "
+                  val p = line.indexOf(marker)
+                  if (p < 0) return null
+                  val prefix = line.substring(0, p)
+                  val rest = line.substring(p + marker.length)
+                  val login = prefix.removePrefix(":").substringBefore("!").lowercase()
+                  val sep = rest.indexOf(" :")
+                  if (sep < 0) return null
+                  var text = rest.substring(sep + 2)
+                  if (text.startsWith("\u0001ACTION")) {
+                      text = text.removePrefix("\u0001ACTION").removeSuffix("\u0001")
+                  }
+                  text = text.trim()
+                  val name = (tags["display-name"] ?: "").replace("\\s", " ").ifEmpty { login }
+                  return Triple(login, name, text)
+              }
+          }
+          QTTS_EOF
+          mkdir -p app/src/main/java/com/example/questtts
+          cat > app/src/main/java/com/example/questtts/KeepAliveService.kt <<'QTTS_EOF'
+          package com.example.questtts
+
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.content.Context
+          import android.content.Intent
+          import android.os.IBinder
+
+          /**
+           * Servicio en primer plano para que Android no cierre la app
+           * mientras está conectada al chat.
+           */
+          class KeepAliveService : Service() {
+
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  val nm = getSystemService(NotificationManager::class.java)
+                  nm.createNotificationChannel(
+                      NotificationChannel("tts", "TTS Twitch", NotificationManager.IMPORTANCE_LOW)
+                  )
+                  val pi = PendingIntent.getActivity(
+                      this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+                  )
+                  val notification = Notification.Builder(this, "tts")
+                      .setContentTitle("TTS Twitch activo")
+                      .setContentText("Leyendo el chat")
+                      .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                      .setContentIntent(pi)
+                      .build()
+                  startForeground(1, notification)
+                  return START_NOT_STICKY
+              }
+
+              companion object {
+                  fun start(ctx: Context) {
+                      try {
+                          ctx.startForegroundService(Intent(ctx, KeepAliveService::class.java))
+                      } catch (_: Exception) {
+                      }
+                  }
+
+                  fun stop(ctx: Context) {
+                      try {
+                          ctx.stopService(Intent(ctx, KeepAliveService::class.java))
+                      } catch (_: Exception) {
+                      }
+                  }
+              }
+          }
+          QTTS_EOF
+          mkdir -p app/src/main/java/com/example/questtts
+          cat > app/src/main/java/com/example/questtts/MainActivity.kt <<'QTTS_EOF'
+          package com.example.questtts
+
+          import android.app.Activity
+          import android.os.Bundle
+          import android.text.Editable
+          import android.text.TextWatcher
+          import android.view.Gravity
+          import android.view.View
+          import android.widget.AdapterView
+          import android.widget.ArrayAdapter
+          import android.widget.Button
+          import android.widget.CheckBox
+          import android.widget.EditText
+          import android.widget.LinearLayout
+          import android.widget.SeekBar
+          import android.widget.Spinner
+          import android.widget.TextView
+
+          class MainActivity : Activity() {
+
+              private lateinit var etChannel: EditText
+              private lateinit var btnConnect: Button
+              private lateinit var btnPause: Button
+              private lateinit var spVoice: Spinner
+              private lateinit var llBlacklist: LinearLayout
+              private lateinit var tvLog: TextView
+              private lateinit var tvStatus: TextView
+
+              private var shownVoices: List<String> = emptyList()
+              private var shownBlacklist: List<String> = emptyList()
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  Core.init(this)
+                  setContentView(R.layout.activity_main)
+
+                  etChannel = findViewById(R.id.etChannel)
+                  btnConnect = findViewById(R.id.btnConnect)
+                  btnPause = findViewById(R.id.btnPause)
+                  spVoice = findViewById(R.id.spVoice)
+                  llBlacklist = findViewById(R.id.llBlacklist)
+                  tvLog = findViewById(R.id.tvLog)
+                  tvStatus = findViewById(R.id.tvStatus)
+
+                  val btnSkip = findViewById<Button>(R.id.btnSkip)
+                  val btnTest = findViewById<Button>(R.id.btnTest)
+                  val btnAdd = findViewById<Button>(R.id.btnAdd)
+                  val etNewUser = findViewById<EditText>(R.id.etNewUser)
+                  val etMax = findViewById<EditText>(R.id.etMax)
+                  val cbName = findViewById<CheckBox>(R.id.cbName)
+                  val cbCmd = findViewById<CheckBox>(R.id.cbCmd)
+                  val cbLinks = findViewById<CheckBox>(R.id.cbLinks)
+                  val sbRate = findViewById<SeekBar>(R.id.sbRate)
+                  val sbVol = findViewById<SeekBar>(R.id.sbVol)
+
+                  // Valores guardados
+                  etChannel.setText(Core.channel)
+                  cbName.isChecked = Core.readName
+                  cbCmd.isChecked = Core.ignoreCommands
+                  cbLinks.isChecked = Core.ignoreLinks
+                  etMax.setText(Core.maxLength.toString())
+                  sbRate.progress = (Core.rate * 100).toInt().coerceIn(50, 200) - 50
+                  sbVol.progress = (Core.volume * 100).toInt().coerceIn(0, 100)
+
+                  // Conectar / desconectar
+                  btnConnect.setOnClickListener {
+                      if (Core.connected) {
+                          Core.disconnect()
+                      } else {
+                          val c = etChannel.text.toString().trim()
+                          if (c.isEmpty()) {
+                              etChannel.error = "Escribe el nombre de tu canal"
+                          } else {
+                              Core.connect(c)
+                          }
+                      }
+                      refresh()
+                  }
+
+                  btnPause.setOnClickListener { Core.togglePause() }
+                  btnSkip.setOnClickListener { Core.skip() }
+                  btnTest.setOnClickListener { Core.speakTest() }
+
+                  // Opciones
+                  cbName.setOnCheckedChangeListener { _, v -> Core.readName = v }
+                  cbCmd.setOnCheckedChangeListener { _, v -> Core.ignoreCommands = v }
+                  cbLinks.setOnCheckedChangeListener { _, v -> Core.ignoreLinks = v }
+
+                  etMax.addTextChangedListener(object : TextWatcher {
+                      override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+                      override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+                      override fun afterTextChanged(s: Editable?) {
+                          val n = s?.toString()?.toIntOrNull() ?: return
+                          Core.maxLength = n.coerceIn(20, 500)
+                      }
+                  })
+
+                  sbRate.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                      override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                          if (fromUser) Core.rate = (p + 50) / 100f
+                      }
+
+                      override fun onStartTrackingTouch(sb: SeekBar?) {}
+                      override fun onStopTrackingTouch(sb: SeekBar?) {}
+                  })
+
+                  sbVol.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                      override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                          if (fromUser) Core.volume = p / 100f
+                      }
+
+                      override fun onStartTrackingTouch(sb: SeekBar?) {}
+                      override fun onStopTrackingTouch(sb: SeekBar?) {}
+                  })
+
+                  spVoice.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                      override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                          val name = shownVoices.getOrNull(pos) ?: return
+                          Core.voiceName = name
+                          Core.applyVoice()
+                      }
+
+                      override fun onNothingSelected(p: AdapterView<*>?) {}
+                  }
+
+                  // Lista negra
+                  val addUser = {
+                      Core.addBlacklist(etNewUser.text.toString())
+                      etNewUser.setText("")
+                  }
+                  btnAdd.setOnClickListener { addUser() }
+                  etNewUser.setOnEditorActionListener { _, _, _ ->
+                      addUser()
+                      true
+                  }
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  Core.uiListener = { refresh() }
+                  refresh()
+              }
+
+              override fun onPause() {
+                  Core.uiListener = null
+                  super.onPause()
+              }
+
+              private fun refresh() {
+                  btnConnect.text = if (Core.connected) "Desconectar" else "Conectar"
+                  btnPause.text = if (Core.paused) "▶ Reanudar" else "⏸ Pausar"
+                  tvStatus.text = Core.status
+                  tvLog.text = Core.logText()
+
+                  // Voces (pueden cargarse después de abrir la ventana)
+                  val names = Core.voices.map { it.name }
+                  if (names != shownVoices) {
+                      shownVoices = names
+                      val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, names)
+                      adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                      spVoice.adapter = adapter
+                      val idx = names.indexOf(Core.voiceName)
+                      if (idx >= 0) spVoice.setSelection(idx)
+                  }
+
+                  // Lista negra
+                  val list = Core.blacklist()
+                  if (list != shownBlacklist) {
+                      shownBlacklist = list
+                      llBlacklist.removeAllViews()
+                      for (u in list) {
+                          val row = LinearLayout(this).apply {
+                              orientation = LinearLayout.HORIZONTAL
+                              gravity = Gravity.CENTER_VERTICAL
+                          }
+                          val tv = TextView(this).apply {
+                              text = u
+                              textSize = 18f
+                              layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                          }
+                          val btn = Button(this).apply {
+                              text = "Quitar"
+                              setOnClickListener { Core.removeBlacklist(u) }
+                          }
+                          row.addView(tv)
+                          row.addView(btn)
+                          llBlacklist.addView(row)
+                      }
+                  }
+              }
+          }
+          QTTS_EOF
+
+      - name: Compilar APK
+        working-directory: quest_tts
+        run: gradle assembleDebug --no-daemon
+
+      - name: Publicar APK en Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: TTS Twitch APK ${{ github.run_number }}
+          files: quest_tts/app/build/outputs/apk/debug/app-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TTS-Twitch-APK
+          path: quest_tts/app/build/outputs/apk/debug/app-debug.apk
